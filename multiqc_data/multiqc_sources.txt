@@ -1,0 +1,9 @@
+Module	Section	Sample Name	Source
+FastQC	all_sections	0Hour_002_2	/home/tfkillian/tmp/2019-snakemake-ucdavis/data/0Hour_002_2_fastqc.zip
+FastQC	all_sections	0Hour_002_1	/home/tfkillian/tmp/2019-snakemake-ucdavis/data/0Hour_002_1_fastqc.zip
+FastQC	all_sections	6Hour_001_2	/home/tfkillian/tmp/2019-snakemake-ucdavis/data/6Hour_001_2_fastqc.zip
+FastQC	all_sections	0Hour_001_1	/home/tfkillian/tmp/2019-snakemake-ucdavis/data/0Hour_001_1_fastqc.zip
+FastQC	all_sections	0Hour_001_2	/home/tfkillian/tmp/2019-snakemake-ucdavis/data/0Hour_001_2_fastqc.zip
+FastQC	all_sections	6Hour_001_1	/home/tfkillian/tmp/2019-snakemake-ucdavis/data/6Hour_001_1_fastqc.zip
+FastQC	all_sections	6Hour_002_1	/home/tfkillian/tmp/2019-snakemake-ucdavis/data/6Hour_002_1_fastqc.zip
+FastQC	all_sections	6Hour_002_2	/home/tfkillian/tmp/2019-snakemake-ucdavis/data/6Hour_002_2_fastqc.zip
