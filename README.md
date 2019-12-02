@@ -1,6 +1,7 @@
 # RNAseq_snakemake
 
-This Snakemake pipeline automates a RNAseq workflow utilizing bash command line tools, fastqc trimmomatic, hisat2 and htseq-count. 
+This Snakemake pipeline automates a RNAseq workflow utilizing bash command line tools, fastqc trimmomatic, hisat2 and htseq-count. The input of this pipeline is a fastq.gz file and produces a count matrix file, for further differential expression analysis.
+
 
 ## Dependencies
 
