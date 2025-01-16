@@ -1,0 +1,112 @@
+########################################
+# Snakefile
+########################################
+
+# 1) Define your sample list and input data
+SAMPLES = ["sample1", "sample2", "sample3"]
+DATA_DIR = "data/"
+RESULTS_DIR = "results/"
+GENOME_INDEX = "genome_index/genome"  # prefix path to your HISAT2 index
+
+rule all:
+    input:
+        expand(f"{RESULTS_DIR}/counts/{{sample}}.counts.txt", sample=SAMPLES)
+
+########################################
+# Rule: FastQC on raw reads
+########################################
+rule fastqc_raw:
+    input:
+        forward=f"{DATA_DIR}/{{sample}}_R1.fastq.gz",
+        reverse=f"{DATA_DIR}/{{sample}}_R2.fastq.gz"
+    output:
+        f"{RESULTS_DIR}/qc_raw/{{sample}}_R1_fastqc.html",
+        f"{RESULTS_DIR}/qc_raw/{{sample}}_R2_fastqc.html"
+    shell:
+        """
+        fastqc {input.forward} {input.reverse} --outdir={RESULTS_DIR}/qc_raw
+        """
+
+########################################
+# Rule: Trimming with Trimmomatic (PE)
+########################################
+rule trimmomatic_pe:
+    input:
+        forward=f"{DATA_DIR}/{{sample}}_R1.fastq.gz",
+        reverse=f"{DATA_DIR}/{{sample}}_R2.fastq.gz"
+    output:
+        forward_paired=f"{RESULTS_DIR}/trimmed/{{sample}}_R1_paired.fastq.gz",
+        forward_unpaired=f"{RESULTS_DIR}/trimmed/{{sample}}_R1_unpaired.fastq.gz",
+        reverse_paired=f"{RESULTS_DIR}/trimmed/{{sample}}_R2_paired.fastq.gz",
+        reverse_unpaired=f"{RESULTS_DIR}/trimmed/{{sample}}_R2_unpaired.fastq.gz"
+    params:
+        # Example adapters (adjust path/name to your adapter files)
+        adapters="TruSeq3-PE.fa"
+    threads: 4
+    shell:
+        """
+        trimmomatic PE -threads {threads} \
+            {input.forward} {input.reverse} \
+            {output.forward_paired} {output.forward_unpaired} \
+            {output.reverse_paired} {output.reverse_unpaired} \
+            ILLUMINACLIP:{params.adapters}:2:30:10 \
+            LEADING:3 TRAILING:3 SLIDINGWINDOW:4:15 MINLEN:36
+        """
+
+########################################
+# Rule: FastQC on trimmed reads
+########################################
+rule fastqc_trimmed:
+    input:
+        forward_paired=f"{RESULTS_DIR}/trimmed/{{sample}}_R1_paired.fastq.gz",
+        reverse_paired=f"{RESULTS_DIR}/trimmed/{{sample}}_R2_paired.fastq.gz"
+    output:
+        f"{RESULTS_DIR}/qc_trimmed/{{sample}}_R1_paired_fastqc.html",
+        f"{RESULTS_DIR}/qc_trimmed/{{sample}}_R2_paired_fastqc.html"
+    shell:
+        """
+        fastqc {input.forward_paired} {input.reverse_paired} --outdir={RESULTS_DIR}/qc_trimmed
+        """
+
+########################################
+# Rule: Alignment with HISAT2
+########################################
+rule align_hisat2:
+    input:
+        forward_paired=f"{RESULTS_DIR}/trimmed/{{sample}}_R1_paired.fastq.gz",
+        reverse_paired=f"{RESULTS_DIR}/trimmed/{{sample}}_R2_paired.fastq.gz"
+    output:
+        bam=f"{RESULTS_DIR}/aligned/{{sample}}.bam"
+    params:
+        index=GENOME_INDEX  # path to your HISAT2 index prefix
+    threads: 8
+    shell:
+        """
+        hisat2 -p {threads} -x {params.index} \
+            -1 {input.forward_paired} -2 {input.reverse_paired} \
+        | samtools sort -@ {threads} -o {output.bam}
+        
+        samtools index {output.bam}
+        """
+
+########################################
+# Rule: Gene Counting with HTSeq-count
+########################################
+rule htseq_count:
+    input:
+        bam=f"{RESULTS_DIR}/aligned/{{sample}}.bam"
+    output:
+        counts=f"{RESULTS_DIR}/counts/{{sample}}.counts.txt"
+    params:
+        gtf="reference/annotation.gtf"  # path to your GTF file
+    threads: 2
+    shell:
+        """
+        htseq-count \
+            --format=bam \
+            --order=pos \
+            --stranded=no \
+            --type=exon \
+            --idattr=gene_id \
+            {input.bam} {params.gtf} > {output.counts}
+        """

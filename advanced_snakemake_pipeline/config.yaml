@@ -1,0 +1,25 @@
+name: rnaseq-env
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+dependencies:
+  # Specify Python version as needed
+  - python=3.9
+
+  # Workflow management
+  - snakemake
+
+  # QC tools
+  - fastqc
+  - multiqc
+
+  # Read trimming
+  - trimmomatic
+
+  # Alignment & Counting
+  - subread       # Provides 'subread-align' and 'featureCounts'
+  - samtools      # For sorting/indexing BAM files
+
+  # Java (required by Trimmomatic)
+  - openjdk

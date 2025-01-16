@@ -1,0 +1,198 @@
+####################################################
+# SNAKEFILE
+####################################################
+
+# -----------------------------------------------------------------------------
+# 1) Define project configuration
+# -----------------------------------------------------------------------------
+SAMPLES = ["sample1", "sample2", "sample3"]  # Update to match your sample names
+DATA_DIR = "data"                            # FASTQ input directory
+RESULTS_DIR = "results"                      # Directory for all pipeline outputs
+
+# Paths to reference files (adjust to your setup)
+SUBREAD_INDEX = "reference/subread_index"    # Path/prefix to Subread index
+GTF_FILE = "reference/annotation.gtf"        # Gene annotation in GTF format
+
+# -----------------------------------------------------------------------------
+# 2) Top-level rule (pipeline endpoint)
+# -----------------------------------------------------------------------------
+rule all:
+    """
+    The final pipeline target. Ensures that:
+      1) All sample-level count files have been generated
+      2) MultiQC report has been generated
+    """
+    input:
+        # A per-sample count file
+        expand(f"{RESULTS_DIR}/counts/{{sample}}.txt", sample=SAMPLES),
+        # The multi-sample summary report
+        f"{RESULTS_DIR}/multiqc/multiqc_report.html"
+
+
+# -----------------------------------------------------------------------------
+# 3) FastQC on raw reads
+# -----------------------------------------------------------------------------
+rule fastqc_raw:
+    """
+    Run FastQC on the raw, untrimmed reads.
+    """
+    input:
+        R1 = lambda wildcards: f"{DATA_DIR}/{wildcards.sample}_R1.fastq.gz",
+        R2 = lambda wildcards: f"{DATA_DIR}/{wildcards.sample}_R2.fastq.gz"
+    output:
+        html_R1 = f"{RESULTS_DIR}/fastqc_raw/{{sample}}_R1_fastqc.html",
+        html_R2 = f"{RESULTS_DIR}/fastqc_raw/{{sample}}_R2_fastqc.html",
+        # FastQC also outputs .zip files; capture them if you like
+        zip_R1 = f"{RESULTS_DIR}/fastqc_raw/{{sample}}_R1_fastqc.zip",
+        zip_R2 = f"{RESULTS_DIR}/fastqc_raw/{{sample}}_R2_fastqc.zip"
+    threads: 2
+    shell:
+        """
+        fastqc {input.R1} {input.R2} --outdir {RESULTS_DIR}/fastqc_raw
+        """
+
+
+# -----------------------------------------------------------------------------
+# 4) Trimmomatic (PE mode)
+# -----------------------------------------------------------------------------
+rule trimmomatic:
+    """
+    Trim adapters and low-quality bases using Trimmomatic.
+    Produces paired and unpaired FASTQ files for each sample.
+    """
+    input:
+        R1 = lambda wildcards: f"{DATA_DIR}/{wildcards.sample}_R1.fastq.gz",
+        R2 = lambda wildcards: f"{DATA_DIR}/{wildcards.sample}_R2.fastq.gz"
+    output:
+        R1_paired   = f"{RESULTS_DIR}/trimmed/{{sample}}_R1_paired.fastq.gz",
+        R1_unpaired = f"{RESULTS_DIR}/trimmed/{{sample}}_R1_unpaired.fastq.gz",
+        R2_paired   = f"{RESULTS_DIR}/trimmed/{{sample}}_R2_paired.fastq.gz",
+        R2_unpaired = f"{RESULTS_DIR}/trimmed/{{sample}}_R2_unpaired.fastq.gz"
+    params:
+        # Adjust adapter file path if needed:
+        adapters = "TruSeq3-PE.fa"
+    threads: 8
+    shell:
+        """
+        trimmomatic PE -threads {threads} \
+            {input.R1} {input.R2} \
+            {output.R1_paired} {output.R1_unpaired} \
+            {output.R2_paired} {output.R2_unpaired} \
+            ILLUMINACLIP:{params.adapters}:2:30:10 \
+            LEADING:3 TRAILING:3 SLIDINGWINDOW:4:15 MINLEN:36
+        """
+
+
+# -----------------------------------------------------------------------------
+# 5) FastQC on trimmed reads
+# -----------------------------------------------------------------------------
+rule fastqc_trimmed:
+    """
+    Run FastQC again to evaluate read quality after trimming.
+    """
+    input:
+        R1_paired   = f"{RESULTS_DIR}/trimmed/{{sample}}_R1_paired.fastq.gz",
+        R2_paired   = f"{RESULTS_DIR}/trimmed/{{sample}}_R2_paired.fastq.gz"
+    output:
+        html_R1 = f"{RESULTS_DIR}/fastqc_trimmed/{{sample}}_R1_paired_fastqc.html",
+        html_R2 = f"{RESULTS_DIR}/fastqc_trimmed/{{sample}}_R2_paired_fastqc.html",
+        zip_R1  = f"{RESULTS_DIR}/fastqc_trimmed/{{sample}}_R1_paired_fastqc.zip",
+        zip_R2  = f"{RESULTS_DIR}/fastqc_trimmed/{{sample}}_R2_paired_fastqc.zip"
+    threads: 2
+    shell:
+        """
+        fastqc {input.R1_paired} {input.R2_paired} --outdir {RESULTS_DIR}/fastqc_trimmed
+        """
+
+
+# -----------------------------------------------------------------------------
+# 6) Subread Alignment
+# -----------------------------------------------------------------------------
+rule subread_align:
+    """
+    Align trimmed reads to the reference genome using Subread's subread-align.
+    Then sort and index the resulting BAM file with samtools.
+    """
+    input:
+        R1_paired = f"{RESULTS_DIR}/trimmed/{{sample}}_R1_paired.fastq.gz",
+        R2_paired = f"{RESULTS_DIR}/trimmed/{{sample}}_R2_paired.fastq.gz"
+    output:
+        bam = f"{RESULTS_DIR}/aligned/{{sample}}.bam",
+        bai = f"{RESULTS_DIR}/aligned/{{sample}}.bam.bai"
+    params:
+        idx = SUBREAD_INDEX  # The Subread index prefix
+    threads: 8
+    shell:
+        """
+        # Align with subread-align (paired-end)
+        subread-align \
+            -i {params.idx} \
+            -r {input.R1_paired} \
+            -R {input.R2_paired} \
+            -o {RESULTS_DIR}/aligned/{wildcards.sample}.unsorted.bam \
+            -T {threads}
+
+        # Sort and index
+        samtools sort -o {output.bam} {RESULTS_DIR}/aligned/{wildcards.sample}.unsorted.bam
+        samtools index {output.bam}
+        
+        # Clean up intermediate
+        rm {RESULTS_DIR}/aligned/{wildcards.sample}.unsorted.bam
+        """
+
+
+# -----------------------------------------------------------------------------
+# 7) featureCounts
+# -----------------------------------------------------------------------------
+rule featurecounts:
+    """
+    Count reads mapped to genomic features (e.g., genes) using featureCounts.
+    Generates one count file per sample (standard approach for many pipelines).
+    """
+    input:
+        bam = f"{RESULTS_DIR}/aligned/{{sample}}.bam"
+    output:
+        txt = f"{RESULTS_DIR}/counts/{{sample}}.txt"
+    params:
+        gtf = GTF_FILE
+    threads: 4
+    shell:
+        """
+        featureCounts \
+            -T {threads} \
+            -a {params.gtf} \
+            -o {output.txt} \
+            {input.bam}
+
+        # featureCounts outputs additional summary files.
+        # They will appear in the same directory as {output.txt}.
+        """
+
+
+# -----------------------------------------------------------------------------
+# 8) MultiQC
+# -----------------------------------------------------------------------------
+rule multiqc:
+    """
+    Aggregate QC reports (FastQC, featureCounts logs, etc.) into one report.
+    """
+    input:
+        # We collect all FastQC outputs (raw + trimmed) so they must exist
+        expand(f"{RESULTS_DIR}/fastqc_raw/{{sample}}_R1_fastqc.html", sample=SAMPLES),
+        expand(f"{RESULTS_DIR}/fastqc_raw/{{sample}}_R2_fastqc.html", sample=SAMPLES),
+        expand(f"{RESULTS_DIR}/fastqc_trimmed/{{sample}}_R1_paired_fastqc.html", sample=SAMPLES),
+        expand(f"{RESULTS_DIR}/fastqc_trimmed/{{sample}}_R2_paired_fastqc.html", sample=SAMPLES),
+        # Also depends on all featureCounts logs (produced alongside the txt output)
+        expand(f"{RESULTS_DIR}/counts/{{sample}}.txt.summary", sample=SAMPLES)
+    output:
+        html = f"{RESULTS_DIR}/multiqc/multiqc_report.html"
+    threads: 2
+    shell:
+        """
+        multiqc {RESULTS_DIR} --outdir {RESULTS_DIR}/multiqc
+        """
+
+
+####################################################
+# END OF SNAKEFILE
+####################################################
